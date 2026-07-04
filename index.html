@@ -308,7 +308,14 @@
       <input type="text" id="wbName" class="mono" placeholder="如：《破产》世界观" autocomplete="off">
     </div>
     <div class="field" style="margin-bottom:10px">
-      <label>配角群像人数上限（配角太多易过载，默认 20）</label>
+      <label>配角处理方式</label>
+      <select id="minorMode" class="mono">
+        <option value="group">合成一条群像合集（省条目）</option>
+        <option value="each">每个配角单独一条绿灯条目（更细）</option>
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:10px">
+      <label>配角人数上限（配角太多易过载，默认 20）</label>
       <input type="number" id="minorCap" class="mono" value="20" step="5" min="1" style="max-width:160px">
     </div>
     <details class="adv" style="margin-bottom:10px">
@@ -326,6 +333,8 @@
       <button class="ghost" id="wbBgBtn" type="button">＋共享背景大纲</button>
       <button class="ghost" id="wbMinorBtn" type="button">＋配角群像合集</button>
       <button class="ghost" id="wbPlotBtn" type="button">＋剧情分段总结</button>
+      <button class="ghost" id="wbCharListBtn" type="button">＋人物列表（蓝灯）</button>
+      <button class="ghost" id="wbPlotListBtn" type="button">＋剧情大纲（蓝灯）</button>
       <span id="wbMsg" class="faint" style="font-size:12px"></span>
     </div>
     <div class="log" id="wbLog"></div>
@@ -695,7 +704,7 @@ async function fetchWithTimeout(url, opts, ms=90000){
   finally{ clearTimeout(t); }
 }
 // 所有会发请求的按钮：同一时刻只允许一个在跑，其余禁用，避免并发抢占 runController 导致卡死
-const ASYNC_BTNS=["scanBtn","genBtn","contBtn","reviseBtn","wbBtn","wbBgBtn","wbMinorBtn","wbPlotBtn","wbContBtn","wbReviseBtn","styleBtn","checkRunBtn"];
+const ASYNC_BTNS=["scanBtn","genBtn","contBtn","reviseBtn","wbBtn","wbBgBtn","wbMinorBtn","wbPlotBtn","wbCharListBtn","wbPlotListBtn","wbContBtn","wbReviseBtn","styleBtn","checkRunBtn"];
 let runningBtn=null;
 function setRunning(btn,on){
   if(on){
@@ -1700,36 +1709,102 @@ $("wbMinorBtn").onclick=async()=>{
   if(!characters.length){ flash($("wbMsg"),"请先在上方扫描角色",true); return; }
   if(!els.baseUrl.value.trim()||!els.model.value.trim()){ flash($("wbMsg"),"请先填接口设置",true); return; }
 
-  setRunning(btn,true); $("wbMsg").innerHTML='<span class="spinner"></span>归纳配角…';
+  setRunning(btn,true);
+  const mode=$("minorMode").value;
+  $("wbMsg").innerHTML='<span class="spinner"></span>'+(mode==="each"?"逐个配角…":"归纳配角…");
   const signal=runSignal();
   const maxT=Math.max(4000,parseInt(els.maxTok.value)||4000);
   const sample=sampleForStyle(text);
   const cap=Math.max(1, parseInt($("minorCap").value)||20);
   const list=characters.map(c=>"· "+c.name+(c.aliases&&c.aliases.length?("（"+c.aliases.join("、")+"）"):"")+(c.role?("："+c.role):"")).join("\n");
-  const prompt=
-    "下面是这部小说的角色清单和节选。请把其中的**配角**归纳成一条「群像合集」世界书条目。\n"+
-    "主角 / 核心角色请略过（他们会单独出卡）。从配角里挑出最重要的，**最多收录 "+cap+" 个**（按重要性取舍，超出的舍去）。\n"+
-    "写法分层：真正跑龙套、出场极少的，可以一两句带过；**其余有戏份的配角，每人至少 100 字**，写清身份、性格、地位、与主角及彼此的关系——他们是这个世界里活生生的人，不是工具人，别糊弄。\n"+
-    "只依据原文、不编造，原文没写的就不写。用「· 名字：介绍」的形式，直接输出正文，不要解释、不要代码块。\n\n"+
-    "角色清单：\n"+list+"\n\n=== 小说节选 ===\n"+sample;
   const onWait=(n,code,w)=>flash($("wbMsg"),"HTTP "+code+"，重试("+n+")",true);
   try{
-    const raw=await generate(userMsgs(prompt),{maxTokens:maxT,useStream:$("stream").checked,signal,onText:f=>{$("wbOut").value=stripThink(f);},onWait,maxCont:$("autoCont").checked?5:0,logEl:"wbLog",label:"配角群像"});
-    const content=stripFence(stripThink(raw)).trim();
-    if(!content){ flash($("wbMsg"),"没归纳出内容",true); return; }
-    let keys=[]; characters.forEach(c=>{ keys.push(c.name); (c.aliases||[]).forEach(a=>keys.push(a)); });
-    keys=[...new Set(keys.filter(Boolean))].slice(0,80);
-    const entry={ category:"人物", title:"配角群像合集", keys, content, constant:false };
-    const i=wbEntries.findIndex(e=>e.title===entry.title);
-    if(i>=0) wbEntries[i]=entry; else wbEntries.push(entry);
-    $("wbOut").value=buildWbPreview(wbEntries);
-    $("wbMsg").textContent="已加入配角群像（共 "+wbEntries.length+" 条）";
-    saveHistory({ id:Date.now(), type:"worldbook", time:new Date().toLocaleString(), title:"世界书 · "+wbEntries.length+" 条（含配角群像）", model:els.model.value.trim(), text:$("wbOut").value });
+    if(mode==="each"){
+      // 每个配角单独一条绿灯条目
+      const prompt=
+        "下面是这部小说的角色清单和节选。请为其中的**配角**逐个生成世界书条目（主角/核心角色略过，他们单独出卡）。\n"+
+        "从配角里挑最重要的，**最多 "+cap+" 个**。每个配角一条，写清身份、性格、地位、与主角及彼此的关系，有戏份的尽量详细。\n"+
+        "只依据原文、不编造。输出 JSON 数组 [{\"name\":\"配角名\",\"keys\":[\"触发关键词2~4个\"],\"content\":\"介绍\"}]，只输出 JSON，不要代码块、不要解释。\n\n"+
+        "角色清单：\n"+list+"\n\n=== 小说节选 ===\n"+sample;
+      const raw=await generate(userMsgs(prompt),{maxTokens:Math.max(maxT,12000),useStream:$("stream").checked,signal,onText:f=>{$("wbOut").value=stripThink(f);},onWait,maxCont:$("autoCont").checked?5:0,logEl:"wbLog",label:"逐个配角"});
+      const arr=extractJsonArray(stripFence(stripThink(raw)));
+      if(!Array.isArray(arr)||!arr.length){ flash($("wbMsg"),"没解析出配角条目",true); return; }
+      let n=0;
+      for(const e of arr){
+        if(!e||!e.name||!e.content) continue;
+        const nm=String(e.name).trim();
+        let keys=Array.isArray(e.keys)? e.keys.map(k=>String(k).trim()).filter(Boolean):[];
+        if(!keys.includes(nm)) keys.unshift(nm);
+        const entry={ category:"配角", title:"配角·"+nm, keys, content:String(e.content).trim(), constant:false };
+        const idx=wbEntries.findIndex(x=>x.title===entry.title);
+        if(idx>=0) wbEntries[idx]=entry; else wbEntries.push(entry);
+        n++;
+      }
+      $("wbOut").value=buildWbPreview(wbEntries);
+      $("wbMsg").textContent="已加入 "+n+" 个配角条目（共 "+wbEntries.length+" 条）";
+    }else{
+      // 合成一条群像
+      const prompt=
+        "下面是这部小说的角色清单和节选。请把其中的**配角**归纳成一条「群像合集」世界书条目。\n"+
+        "主角 / 核心角色请略过（他们会单独出卡）。从配角里挑出最重要的，**最多收录 "+cap+" 个**（按重要性取舍，超出的舍去）。\n"+
+        "写法分层：真正跑龙套、出场极少的，可以一两句带过；**其余有戏份的配角，每人至少 100 字**，写清身份、性格、地位、与主角及彼此的关系——他们是这个世界里活生生的人，不是工具人，别糊弄。\n"+
+        "只依据原文、不编造，原文没写的就不写。用「· 名字：介绍」的形式，直接输出正文，不要解释、不要代码块。\n\n"+
+        "角色清单：\n"+list+"\n\n=== 小说节选 ===\n"+sample;
+      const raw=await generate(userMsgs(prompt),{maxTokens:maxT,useStream:$("stream").checked,signal,onText:f=>{$("wbOut").value=stripThink(f);},onWait,maxCont:$("autoCont").checked?5:0,logEl:"wbLog",label:"配角群像"});
+      const content=stripFence(stripThink(raw)).trim();
+      if(!content){ flash($("wbMsg"),"没归纳出内容",true); return; }
+      let keys=[]; characters.forEach(c=>{ keys.push(c.name); (c.aliases||[]).forEach(a=>keys.push(a)); });
+      keys=[...new Set(keys.filter(Boolean))].slice(0,80);
+      const entry={ category:"人物", title:"配角群像合集", keys, content, constant:false };
+      const i=wbEntries.findIndex(e=>e.title===entry.title);
+      if(i>=0) wbEntries[i]=entry; else wbEntries.push(entry);
+      $("wbOut").value=buildWbPreview(wbEntries);
+      $("wbMsg").textContent="已加入配角群像（共 "+wbEntries.length+" 条）";
+    }
+    saveHistory({ id:Date.now(), type:"worldbook", time:new Date().toLocaleString(), title:"世界书 · "+wbEntries.length+" 条", model:els.model.value.trim(), text:$("wbOut").value });
   }catch(e){
     if(isAbort(e,signal)) $("wbMsg").textContent="已停止";
     else flash($("wbMsg"),"失败："+e.message,true);
   }finally{ setRunning(btn,false); }
 };
+
+// 蓝灯列表：一条常驻条目（人物列表 / 剧情大纲）
+async function wbConstantEntry(btn, kind){
+  if(btn.dataset.running){ stopRun(); return; }
+  const text=$("novel").value.trim();
+  if(!text){ flash($("wbMsg"),"请先导入小说",true); return; }
+  if(!els.baseUrl.value.trim()||!els.model.value.trim()){ flash($("wbMsg"),"请先填接口设置",true); return; }
+  setRunning(btn,true); $("wbMsg").innerHTML='<span class="spinner"></span>'+(kind==="chars"?"生成人物列表…":"生成剧情大纲…");
+  const signal=runSignal();
+  const maxT=Math.max(6000,parseInt(els.maxTok.value)||4000);
+  const sample=sampleForStyle(text);
+  const onWait=(n,code,w)=>flash($("wbMsg"),"HTTP "+code+"，重试("+n+")",true);
+  let prompt, title;
+  if(kind==="chars"){
+    title="人物列表";
+    const list=characters.length? ("已知角色：\n"+characters.map(c=>"· "+c.name).join("\n")+"\n\n") : "";
+    prompt="下面是小说节选"+(characters.length?"和已知角色清单":"")+"。请生成一份**人物列表**，作为始终注入的常驻设定：把主要人物逐个列出，每人一行到两行，标明身份、与主角关系、核心性格。只依据原文、不编造。直接输出列表正文，不要解释、不要代码块。\n\n"+list+"=== 小说节选 ===\n"+sample;
+  }else{
+    title="剧情大纲";
+    prompt="下面是小说节选。请生成一份**剧情大纲**，作为始终注入的常驻设定：按时间顺序概述主线走向与关键转折（几段即可），让 AI 始终了解故事全貌。只依据原文、不编造。直接输出大纲正文，不要解释、不要代码块。\n\n=== 小说节选 ===\n"+sample;
+  }
+  try{
+    const raw=await generate(userMsgs(prompt),{maxTokens:maxT,useStream:$("stream").checked,signal,onText:f=>{$("wbOut").value=stripThink(f);},onWait,maxCont:$("autoCont").checked?5:0,logEl:"wbLog",label:title});
+    const content=stripFence(stripThink(raw)).trim();
+    if(!content){ flash($("wbMsg"),"没生成内容",true); return; }
+    const entry={ category:"总纲", title, keys:[], content, constant:true };  // 蓝灯常驻
+    const idx=wbEntries.findIndex(x=>x.title===title);
+    if(idx>=0) wbEntries[idx]=entry; else wbEntries.unshift(entry);
+    $("wbOut").value=buildWbPreview(wbEntries);
+    $("wbMsg").textContent="已加入「"+title+"」（蓝灯，共 "+wbEntries.length+" 条）";
+    saveHistory({ id:Date.now(), type:"worldbook", time:new Date().toLocaleString(), title:"世界书 · "+wbEntries.length+" 条（含"+title+"）", model:els.model.value.trim(), text:$("wbOut").value });
+  }catch(e){
+    if(isAbort(e,signal)) $("wbMsg").textContent="已停止";
+    else flash($("wbMsg"),"失败："+e.message,true);
+  }finally{ setRunning(btn,false); }
+}
+$("wbCharListBtn").onclick=()=>wbConstantEntry($("wbCharListBtn"),"chars");
+$("wbPlotListBtn").onclick=()=>wbConstantEntry($("wbPlotListBtn"),"plot");
 
 $("wbDl").onclick=()=>{
   if(!wbEntries.length){ flash($("wbMsg"),"还没有条目",true); return; }

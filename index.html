@@ -100,7 +100,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>角色卡提取工具 <span style="font-size:13px;font-weight:500;color:var(--gold);vertical-align:2px">v5.7.1</span></h1>
+    <h1>角色卡提取工具 <span style="font-size:13px;font-weight:500;color:var(--gold);vertical-align:2px">v5.7.2</span></h1>
     <div class="sub">导入小说 · 扫描角色 · 按模板抽取角色卡</div>
     <div class="rule"></div>
   </header>
@@ -372,6 +372,13 @@
     <div class="btnrow" style="margin-top:0;margin-bottom:6px">
       <label class="toggle"><input type="checkbox" id="styleNsfw"> 包含情欲描写文风</label>
     </div>
+    <details class="adv" style="margin-bottom:10px">
+      <summary>自定义要求（可选，留空用默认）</summary>
+      <div class="field" style="margin-top:6px">
+        <label>额外要求 / 侧重点——会加进文风分析的指令里。例：重点分析对白风格、多给可直接套用的句式模板、用第二人称写成给 AI 的指令、控制在 500 字内……</label>
+        <textarea id="styleExtra" rows="3" placeholder="想让它侧重什么、按什么格式产出，就写在这里。"></textarea>
+      </div>
+    </details>
     <div class="btnrow">
       <button class="primary" id="styleBtn">蒸馏文风</button>
       <span id="styleMsg" class="faint" style="font-size:12px"></span>
@@ -2251,6 +2258,7 @@ $("styleBtn").onclick=async()=>{
     "- 标志性特征：这位作者最容易辨认的笔法\n"+
     (eroLine? eroLine+"\n":"")+
     "\n## 可复用文风提示词\n（写一段能直接粘贴给 AI 的第二人称写作指令，开头「请以如下文风写作：」，把上面最关键的几点浓缩成可执行的指令。）\n\n"+
+    (($("styleExtra").value.trim())? ("【用户的额外要求，请优先满足】\n"+$("styleExtra").value.trim()+"\n\n") : "")+
     "=== 小说节选 ===\n"+sample;
   const messages=[{role:"system",content:withSys(sys)},{role:"user",content:user}];
   const onWait=(n,code,w)=>logTo("styleLog","HTTP "+code+"，"+(w/1000)+"s 后重试("+n+")","e");

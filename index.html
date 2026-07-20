@@ -100,7 +100,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>角色卡提取工具 <span style="font-size:13px;font-weight:500;color:var(--gold);vertical-align:2px">v5.8.2</span></h1>
+    <h1>角色卡提取工具 <span style="font-size:13px;font-weight:500;color:var(--gold);vertical-align:2px">v5.8.3</span></h1>
     <div class="sub">导入小说 · 扫描角色 · 按模板抽取角色卡</div>
     <div class="rule"></div>
   </header>
@@ -406,6 +406,7 @@
       <button class="ghost" id="wbCopy">复制预览</button>
       <button class="ghost" id="wbDl">下载世界书 .json（可导入酒馆）</button>
       <button class="ghost" id="wbContBtn" type="button">继续输出</button>
+      <button class="ghost" id="wbClearBtn" type="button">清空世界书</button>
     </div>
     <div class="field" style="margin-top:14px">
       <label>修改意见（针对上面的世界书，AI 会在当前结果上改）</label>
@@ -1730,6 +1731,13 @@ function buildWbJson(entries){
   return JSON.stringify(out,null,2);
 }
 
+$("wbClearBtn").onclick=()=>{
+  if(runningBtn){ flash($("wbMsg"),"有任务进行中，请先停止",true); return; }
+  if(!wbEntries.length && !$("wbOut").value.trim()){ flash($("wbMsg"),"世界书已经是空的"); return; }
+  if(!confirm("确定清空当前世界书的所有条目、重新开始吗？（历史记录不受影响，之前的可在下面「历史记录」找回）")) return;
+  wbEntries=[]; wbState=null; $("wbOut").value=""; clearLog("wbLog");
+  flash($("wbMsg"),"已清空，可重新勾选生成");
+};
 $("wbCopy").onclick=async()=>{
   const t=$("wbOut").value; if(!t) return;
   try{ await navigator.clipboard.writeText(t); flash($("wbMsg"),"已复制"); }
